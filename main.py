@@ -7,9 +7,6 @@ handles scripture retrieval and optional server-side Gemini generation.
 """
 from __future__ import annotations
 
-# Web deployment is intentionally dependency-free; Raspberry-Pi packages live
-# in requirements-pi.txt and are not required by this entrypoint.
-
 import ast
 import json
 import os
@@ -77,30 +74,21 @@ def _data():
 
 
 INTENTS = {
-    "life_guidance": ["sad", "anxious", "worry", "fear", "confused", "decision", "career", "future", "stress", "anger", "angry", "failure", "exam", "purpose", "duty", "problem", "help"],
-    "medicine": ["medicine", "medical", "healing", "health", "herb", "illness", "disease", "fever", "pain"],
-    "mantra": ["mantra", "chant", "song", "music", "melody", "devotion", "prayer", "meditation", "peace", "calm"],
-    "ritual": ["ritual", "yajna", "havan", "fire", "ceremony", "sacrifice", "offering", "puja", "priest"],
-    "hymn": ["hymn", "courage", "bravery", "protection", "warrior", "praise", "gods"],
+    "life_guidance": ["sad", "anxious", "worry", "fear", "confused", "decision", "career", "future", "stress", "anger", "angry", "failure", "exam", "purpose", "duty", "problem", "help", "उदास", "चिंता", "डर", "परेशान", "फैसला", "करियर", "भविष्य", "तनाव", "गुस्सा", "असफलता", "परीक्षा", "समस्या", "मदद"],
+    "medicine": ["medicine", "medical", "healing", "health", "herb", "illness", "disease", "fever", "pain", "दवा", "स्वास्थ्य", "बीमारी", "बुखार", "दर्द"],
+    "mantra": ["mantra", "chant", "song", "music", "melody", "devotion", "prayer", "meditation", "peace", "calm", "मंत्र", "भजन", "संगीत", "प्रार्थना", "ध्यान", "शांति"],
+    "ritual": ["ritual", "yajna", "havan", "fire", "ceremony", "sacrifice", "offering", "puja", "priest", "यज्ञ", "हवन", "पूजा", "अनुष्ठान"],
+    "hymn": ["hymn", "courage", "bravery", "protection", "warrior", "praise", "gods", "स्तोत्र", "साहस", "रक्षा", "वीर", "देवता"],
 }
 
 
-def _classify(text: str):
-    low = (text or "").lower()
-    scores = {k: sum(1 for word in words if word in low) for k, words in INTENTS.items()}
-    intent = max(scores, key=scores.get)
-    if scores.get(intent, 0) == 0:
-        intent = "life_guidance"
-    return {"medicine": "Atharvaveda", "mantra": "Samaveda", "ritual": "Yajurveda", "hymn": "Rigveda"}.get(intent), intent
-
-
 def _expression_words(expression):
-    return {"positive": "positive and engaged", "downcast": "downcast", "surprised": "surprised", "neutral": "neutral"}.get((expression or "neutral").lower(), "neutral")
+    return {"happy": "positive facial expression", "sad": "downcast facial expression", "angry": "tense facial expression", "surprised": "surprised facial expression", "fearful": "alert facial expression", "neutral": "neutral facial expression"}.get((expression or "neutral").lower(), "neutral facial expression")
 
 
 def _score(item, query):
     text = " ".join([item.get("meaning", ""), item.get("example", ""), item.get("sanskrit", "")]).lower()
-    words = [w for w in query.lower().replace("?", " ").replace(",", " ").split() if len(w) > 3]
+    words = [w for w in query.lower().replace("?", " ").replace(",", " ").split() if len(w) > 2]
     return sum(1 for w in words if w in text)
 
 
@@ -120,17 +108,31 @@ def _retrieve(message, expression):
     return {"kind": "Four Vedas", "title": "Four Vedas", "text": "The Vedas are presented in this project through separate Rigveda, Yajurveda, Samaveda and Atharvaveda knowledge collections.", "sanskrit": "", "guidance": "Ask about a specific Veda or a life question to retrieve a more focused entry.", "expression": _expression_words(expression)}
 
 
-def _fallback_answer(source):
+def _classify(text: str):
+    low = (text or "").lower()
+    scores = {k: sum(1 for word in words if word in low) for k, words in INTENTS.items()}
+    intent = max(scores, key=scores.get)
+    if scores.get(intent, 0) == 0:
+        intent = "life_guidance"
+    return {"medicine": "Atharvaveda", "mantra": "Samaveda", "ritual": "Yajurveda", "hymn": "Rigveda"}.get(intent), intent
+
+
+def _fallback_answer(source, language):
+    if language == "hi-IN":
+        if source["kind"] == "Bhagavad Gita":
+            return f"भगवद्गीता से प्राप्त संदर्भ के अनुसार मुख्य विचार यह है:\n\n{source['text']}\n\nइसे जीवन में लागू करने का एक तरीका:\n{source['guidance']}"
+        return f"{source['kind']} से संबंधित प्राप्त जानकारी:\n\n{source['text']}\n\nइस प्रोजेक्ट के ज्ञान-संग्रह में इसका मनोवैज्ञानिक फोकस:\n{source['guidance']}"
     if source["kind"] == "Bhagavad Gita":
         return f"Based on the Bhagavad Gita entry I retrieved, the key idea is: {source['text']}\n\nA practical way to apply it: {source['guidance']}"
     return f"From {source['kind']}, the relevant focus is: {source['text']}\n\nIn this project's knowledge base, its psychological focus is: {source['guidance']}"
 
 
-def _gemini_answer(message, expression, source):
+def _gemini_answer(message, expression, source, language):
     key = os.environ.get("GEMINI_API_KEY")
     if not key:
         return None
-    prompt = ("You are Aryavarta, a respectful educational assistant grounded in the project's retrieved Bhagavad Gita and Veda data. Answer naturally and concisely. Do not claim that a facial expression proves someone's emotion; treat it only as a coarse UI signal. Do not invent scripture quotations. If the retrieved source is a summary, say it is a summary.\nUser: " + message + "\nUI expression signal: " + _expression_words(expression) + "\nRetrieved source: " + json.dumps(source, ensure_ascii=False))
+    lang_instruction = "Hindi (Devanagari)" if language == "hi-IN" else "English"
+    prompt = ("You are Aryavarta, a respectful educational assistant grounded in the project's retrieved Bhagavad Gita and Veda data. Answer naturally and concisely in " + lang_instruction + ". Do not claim that a facial expression proves someone's emotion; treat it only as a coarse UI signal. Do not invent scripture quotations. If the retrieved source is a summary, say it is a summary.\nUser: " + message + "\nUI expression signal: " + _expression_words(expression) + "\nRetrieved source: " + json.dumps(source, ensure_ascii=False))
     body = _json_bytes({"contents": [{"parts": [{"text": prompt}]}], "generationConfig": {"temperature": 0.5, "maxOutputTokens": 450}})
     url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=" + key
     req = urlrequest.Request(url, data=body, headers={"Content-Type": "application/json"}, method="POST")
@@ -160,10 +162,13 @@ def app(environ, start_response):
             body = json.loads(raw.decode("utf-8"))
             message = str(body.get("message", "")).strip()
             expression = str(body.get("expression", "neutral"))
+            language = str(body.get("language", "hi-IN"))
+            if language not in {"hi-IN", "en-IN"}:
+                language = "hi-IN"
             if not message:
                 return _response(start_response, "400 Bad Request", {"error": "message is required"})
             source = _retrieve(message, expression)
-            answer = _gemini_answer(message, expression, source) or _fallback_answer(source)
+            answer = _gemini_answer(message, expression, source, language) or _fallback_answer(source, language)
             return _response(start_response, "200 OK", {"answer": answer, "mode": "gemini+retrieval" if os.environ.get("GEMINI_API_KEY") else "retrieval", "expression": source["expression"], "source": {"title": source["title"], "text": source["text"], "sanskrit": source["sanskrit"]}})
         except Exception:
             return _response(start_response, "500 Internal Server Error", {"error": "Aryavarta could not process the request"})
