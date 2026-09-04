@@ -175,6 +175,9 @@ def app(environ, start_response):
     if path == "/" or path == "/index.html":
         try:
             body = INDEX.read_bytes()
+            injection = b'<script src="/emotion.js"></script>'
+            if b'/emotion.js' not in body:
+                body = body.replace(b'</body>', injection + b'</body>')
             start_response("200 OK", [("Content-Type", "text/html; charset=utf-8"), ("Content-Length", str(len(body)))])
             return [body]
         except OSError:
