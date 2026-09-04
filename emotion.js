@@ -4,9 +4,11 @@
 (() => {
   const MODEL_URL = 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task';
   const WASM_URL = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/wasm';
+  // Use ESM builds explicitly. The plain vision_bundle.js is a UMD/browser bundle
+  // and does not reliably expose the named exports when loaded with import().
   const VISION_URLS = [
-    'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/vision_bundle.js',
-    'https://unpkg.com/@mediapipe/tasks-vision@0.10.22/vision_bundle.js'
+    'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/+esm',
+    'https://unpkg.com/@mediapipe/tasks-vision@0.10.22/vision_bundle.mjs'
   ];
 
   let landmarker = null;
@@ -46,11 +48,9 @@
 
   function avg(m, a, b) { return ((m[a] || 0) + (m[b] || 0)) / 2; }
 
-  // Blendshape-based expression heuristic. It does not claim to measure a person's true emotion.
   function classify(result) {
     const m = values(result);
     if (!Object.keys(m).length) return ['neutral', 0.35];
-
     const smile = avg(m, 'mouthSmileLeft', 'mouthSmileRight');
     const frown = avg(m, 'mouthFrownLeft', 'mouthFrownRight');
     const browDown = avg(m, 'browDownLeft', 'browDownRight');
@@ -61,7 +61,6 @@
     const press = avg(m, 'mouthPressLeft', 'mouthPressRight');
     const stretch = avg(m, 'mouthStretchLeft', 'mouthStretchRight');
     const sneer = avg(m, 'noseSneerLeft', 'noseSneerRight');
-
     const scores = {
       happy: Math.min(1, smile * 1.15 + eyeSquint * 0.18),
       sad: Math.min(1, frown * 0.95 + browDown * 0.22),
@@ -70,7 +69,6 @@
       fearful: Math.min(1, eyeWide * 0.45 + browUp * 0.30 + stretch * 0.30),
       neutral: Math.max(0.30, 1 - Math.max(smile, frown, browDown, eyeWide, jaw) * 0.70)
     };
-
     let best = 'neutral';
     for (const k of Object.keys(scores)) if (scores[k] > scores[best]) best = k;
     let score = scores[best];
@@ -81,7 +79,6 @@
   function smooth(name, score) {
     if (name === stable.candidate) stable.count += 1;
     else { stable.candidate = name; stable.count = 1; }
-    // Avoid flickering between expressions on individual frames.
     if (name !== stable.name && stable.count < 2) return;
     stable.name = name;
     stable.score = score;
@@ -98,8 +95,12 @@
       for (const url of VISION_URLS) {
         try {
           const mod = await import(url);
-          vision = mod.default || mod;
-          if (vision?.FaceLandmarker && vision?.FilesetResolver) break;
+          const candidate = mod?.default && mod.default.FaceLandmarker ? mod.default : mod;
+          if (candidate?.FaceLandmarker && candidate?.FilesetResolver) {
+            vision = candidate;
+            break;
+          }
+          lastError = new Error('MediaPipe module loaded but FaceLandmarker export was missing');
         } catch (e) { lastError = e; }
       }
       if (!vision?.FaceLandmarker || !vision?.FilesetResolver) {
@@ -107,8 +108,6 @@
       }
 
       const resolver = await vision.FilesetResolver.forVisionTasks(WASM_URL);
-      // CPU is intentional here: it is slower than GPU on some devices but avoids
-      // WebGL/GPU initialization failures that commonly break mobile browsers.
       landmarker = await vision.FaceLandmarker.createFromOptions(resolver, {
         baseOptions: { modelAssetPath: MODEL_URL },
         runningMode: 'VIDEO',
@@ -175,7 +174,6 @@
     if (!running || !landmarker) return;
     const video = $('video');
     if (video && video.readyState >= 2 && video.currentTime > 0 && now - lastRun >= 120) {
-      // MediaPipe requires monotonically increasing timestamps for VIDEO mode.
       const timestamp = Math.max(Math.round(now), lastTimestamp + 1);
       lastTimestamp = timestamp;
       lastRun = now;
@@ -184,8 +182,8 @@
         if (result?.faceLandmarks?.length) {
           const [name, score] = classify(result);
           smooth(name, score);
-        } else {
-          if ($('faceBadge')) $('faceBadge').textContent = 'FACE • खोज रहा है';
+        } else if ($('faceBadge')) {
+          $('faceBadge').textContent = 'FACE • खोज रहा है';
         }
       } catch (e) {
         console.warn('MediaPipe frame error:', e);
@@ -211,14 +209,10 @@
 
   window.addEventListener('DOMContentLoaded', () => {
     patchChatExpression();
-    // Run after the existing page module has installed its handlers, then replace
-    // only the camera handler. Other chatbot/speech controls remain untouched.
     setTimeout(() => {
       const btn = $('camBtn');
       if (!btn) return;
       btn.onclick = () => running ? stop() : start();
-      // Preload the JS/WASM/model only after the user can see the page; camera permission
-      // is still requested only when the camera button is pressed.
       status('MediaPipe Face Landmarker ready to start.');
     }, 0);
   });
