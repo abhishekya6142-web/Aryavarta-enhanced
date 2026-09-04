@@ -1,0 +1,4 @@
+# The original requirements.txt is for the Raspberry Pi application.
+# The web entrypoint uses only Python's standard library, so Vercel should not
+# attempt to install the Pi/ARM64-only dependency set during web deployment.
+requirements.txt
