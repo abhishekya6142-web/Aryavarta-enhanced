@@ -1,0 +1,13 @@
+numpy==1.26.6
+opencv-python==4.9.0.72
+keras==3.11.0
+tensorflow-aarch64==2.14.1
+edge-tts==0.4.1
+pygame==2.4.0
+deep-translator==1.11.4
+faster-whisper==0.8.7
+sounddevice==0.4.8
+soundfile==0.12.1
+chromadb==0.3.37
+ollama==0.1.0
+requests==2.31.0
